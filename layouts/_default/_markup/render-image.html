@@ -1,18 +1,46 @@
-{{- if .Page.Site.Params.BookPortableLinks -}}
-  {{- template "portable-image" . -}}
-{{- else -}}
-  <img src="{{ .Destination | safeURL }}" alt="{{ .Text }}" {{ with .Title }}title="{{ . }}"{{ end }}/>
+<!--
+This image render hook does a couple of things:
+* It makes sure that images links that are relative to the markdown file gets
+  converted to being relative of the site root. This makes the images show up
+  correctly on the frontpage and in RSS feeds. This uses code adapted from here:
+  - https://github.com/bep/portable-hugo-links/blob/master/layouts/_default/_markup/render-image.html
+  - https://github.com/zoni/obsidian-export/issues/8#issuecomment-774521792
+* It allows one to set `img_scale: 0.5` in the frontmatter. This is useful to set 
+  if a post contains high-res "retina" images that otherwise would be really large.
+* It allows one to override any `img_scale` setting by abusing the image title
+  like this: ![](path/to/super-high-res-image.jpeg "img_scale: 0.25"). The
+  `img_scale: 0.25`part will also be removed from the image title.
+-->
+
+<!-- Is there an actual image at the image URL/.Destination? -->
+{{- $img := .Page.Resources.GetMatch .Destination -}}
+{{- if and (not $img) .Page.File -}}
+  {{- $path := path.Join .Page.File.Dir .Destination -}}
+  {{- $img = resources.Get $path -}}
 {{- end -}}
 
-{{- define "portable-image" -}}
-  {{- $isRemote := or (in .Destination "://") (strings.HasPrefix .Destination "//") }}
-  {{- if not $isRemote }}
-    {{- $path := print .Page.File.Dir .Destination }}
-    {{- if strings.HasPrefix .Destination "/" }}
-    {{- end }}
-    {{- if not (fileExists $path) }}
-      {{- warnf "Image '%s' not found in '%s'" .Destination .Page.File }}
-    {{- end }}
-  {{- end }}
-  <img src="{{ .Destination | safeURL }}" alt="{{ .Text }}" {{ with .Title }}title="{{ . }}"{{ end }}/>
+<!-- Figuring out whether img_scale is set in the image title or 
+     in the Page frontmatter. It's a fairly complicated process...  */ -->
+{{- $img_scale := false -}}
+{{- $title := .Title -}}
+{{- $img_scale_regexp := `\s*img_scale:\s*([0-9]*[.])?[0-9]+\s*` -}}
+{{- $title_img_scale_text := index (findRE $img_scale_regexp $title) 0 -}}
+{{- if $title_img_scale_text -}}
+  {{- $title = replace $title $title_img_scale_text "" -}}
+  {{- $number_regexp := `([0-9]*[.])?[0-9]+` -}}
+  {{- $img_scale = float (index (findRE $number_regexp $title_img_scale_text) 0 )  -}}
+{{- else if isset .Page.Params "img_scale" -}}
+  {{- $img_scale = .Page.Params.img_scale -}}
 {{- end -}}
+
+<!-- /* Finally rendering the actual img tag! */ -->
+
+{{- if $img -}}
+  {{- $is_raster_img := ne $img.MediaType.SubType "svg" -}}
+  {{- $should_set_width := and $img_scale $is_raster_img -}}
+  <img src="{{ $img.RelPermalink }}" {{if .Text}}alt="{{ .Text }}"{{end}} {{if $title}}title="{{$title}}"{{end}} {{ if $should_set_width }} width = "{{ mul $img.Width $img_scale }}" {{ end }}/>
+{{- else -}}
+  <img src="{{ .Destination | safeURL }}" {{if .Text}}alt="{{ .Text }}"{{end}} {{if $title}}title="{{$title}}"{{end}} />
+{{- end -}}
+
+{{- /* Removes trailing whitespace */ -}}
